@@ -1,7 +1,6 @@
 streamlit
 plotly
 pyserial
-smtplib
 email
 datetime
 threading
