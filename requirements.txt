@@ -1,0 +1,11 @@
+streamlit
+plotly
+pyserial
+smtplib
+email
+datetime
+threading
+queue
+csv
+os
+time
