@@ -1,9 +1,4 @@
 streamlit
 plotly
 pyserial
-datetime
-threading
-queue
 csv
-os
-time
