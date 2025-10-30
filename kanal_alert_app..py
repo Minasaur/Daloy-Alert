@@ -2,6 +2,26 @@ import serial, streamlit as st, plotly.graph_objects as go
 import time, csv, os, pandas as pd
 from datetime import datetime
 
+import requests
+
+BACKEND_URL = "https://daloy-alert.onrender.com"  # replace with your URL
+
+def fetch_data():
+    try:
+        response = requests.get(BACKEND_URL)
+        if response.status_code == 200:
+            data = response.json()
+            downstream = data.get("downstream")
+            upstream = data.get("upstream")
+            difference = data.get("difference")
+            if downstream is not None and upstream is not None and difference is not None:
+                return upstream, downstream, difference
+        return None, None, None
+    except Exception as e:
+        st.error(f"Error fetching data: {e}")
+        return None, None, None
+
+
 # ---------------- CONFIG ----------------
 os.makedirs("logs", exist_ok=True)
 st.set_page_config(page_title="💧 DALOY Monitoring App", layout="wide")  # 👈 full screen layout
