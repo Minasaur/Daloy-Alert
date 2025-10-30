@@ -24,19 +24,38 @@ button[kind="primary"] { background-color: #0d47a1 !important; color: white !imp
 # ---------------- BACKEND CONFIG ----------------
 def fetch_data():
     try:
-        FIREBASE_URL = "https://daloy-alert-default-rtdb.asia-southeast1.firebasedatabase.app/latest_reading.json"
+        FIREBASE_URL = "https://daloy-alert-default-rtdb.asia-southeast1.firebasedatabase.app/canal_readings.json"
         response = requests.get(FIREBASE_URL, timeout=5)
+
         if response.status_code == 200:
             data = response.json()
-            downstream = data.get("downstream")
-            upstream = data.get("upstream")
-            difference = data.get("difference")
+
+            if not data:
+                st.info("No data found in Firebase yet. Waiting for ESP32 to send readings...")
+                return None, None, None
+
+            # Get the most recent record
+            last_key = list(data.keys())[-1]
+            latest = data[last_key]
+
+            downstream = latest.get("downstream")
+            upstream = latest.get("upstream")
+            difference = latest.get("difference")
+
             if downstream is not None and upstream is not None and difference is not None:
                 return upstream, downstream, difference
-        return None, None, None
+
+            st.warning("Incomplete data in latest Firebase record.")
+            return None, None, None
+
+        else:
+            st.error(f"Firebase responded with status: {response.status_code}")
+            return None, None, None
+
     except Exception as e:
         st.error(f"Error fetching data from Firebase: {e}")
         return None, None, None
+
 
 
 # ---------------- SESSION INITIALIZATION ----------------
