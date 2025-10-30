@@ -1,192 +1,148 @@
 import serial, streamlit as st, plotly.graph_objects as go
-import smtplib
-from email.mime.text import MIMEText
-import time, threading, queue, csv
+import time, csv, os, pandas as pd
 from datetime import datetime
-import os
+
+# ---------------- CONFIG ----------------
 os.makedirs("logs", exist_ok=True)
+st.set_page_config(page_title="💧 DALOY Monitoring App", layout="wide")  # 👈 full screen layout
 
-
-st.set_page_config(page_title="💧 DALOY Monitoring App", layout="centered")
-st.title("💧 DALOY Monitoring App")
-st.subheader("Real-Time Kanal Flood Monitoring Dashboard")
-
+# ---------------- STYLE ----------------
 st.markdown("""
 <style>
 body, .main { background-color: #a7d8f0 !important; color: black !important; }
-.block-container { background-color: #a7d8f0 !important; padding: 25px; }
+.block-container { background-color: #a7d8f0 !important; padding: 25px; max-width: 95% !important; }
 .reading-box { background-color: #ffffff; border: 3px solid #0d47a1; border-radius: 12px; padding: 20px; text-align: center; color: black !important; }
-.reading-grid { display: flex; justify-content: space-around; margin-top: 15px; }
-.reading-item { flex: 1; margin: 0 6px; background-color: #e3f2fd; border: 2px solid #0d47a1; border-radius: 8px; padding: 15px; font-weight: bold; text-align: center; color: black !important; }
+.reading-grid { display: flex; justify-content: space-around; margin-top: 15px; flex-wrap: wrap; gap: 10px; }
+.reading-item { flex: 1; min-width: 180px; background-color: #e3f2fd; border: 2px solid #0d47a1; border-radius: 8px; padding: 15px; font-weight: bold; text-align: center; color: black !important; }
 .remark-box { background-color: #e3f2fd; border: 2px solid #0d47a1; border-radius: 10px; padding: 15px; margin-top: 15px; text-align: center; font-size: 17px; color: black !important; }
+button[kind="primary"] { background-color: #0d47a1 !important; color: white !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- SIDEBAR ----------------
-st.sidebar.header("📩 Alert Email")
-recipient_email = st.sidebar.text_input("Enter your email to receive alerts:")
-
-# ---------------- EMAIL ----------------
-SENDER_EMAIL = "canal.monitoring876@gmail.com"
-SENDER_PASSWORD = "qfpc wddz noca dycb"
-
-email_queue = queue.Queue()
-def send_email(to_email, subject, body):
-    if not to_email:
-        return
+# ---------------- SERIAL SETUP ----------------
+def try_connect_serial():
     try:
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"] = SENDER_EMAIL
-        msg["To"] = to_email
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(SENDER_EMAIL, SENDER_PASSWORD)
-            server.send_message(msg)
+        if 'ser' in st.session_state and st.session_state.ser and st.session_state.ser.is_open:
+            return st.session_state.ser
+        ser = serial.Serial("COM5", 115200, timeout=2)
+        time.sleep(2)
+        ser.reset_input_buffer()
+        return ser
     except Exception as e:
-        print("Email error:", e)
-
-def email_worker():
-    while True:
-        try:
-            to_email, subject, body = email_queue.get()
-            send_email(to_email, subject, body)
-            email_queue.task_done()
-        except Exception as e:
-            print("Email worker error:", e)
-
-threading.Thread(target=email_worker, daemon=True).start()
-
-# ---------------- SERIAL ----------------
-if 'ser' not in st.session_state:
-    try:
-        st.session_state.ser = serial.Serial("COM5", 115200, timeout=2)
-        st.success("✅ ESP32 connected on COM5")
-    except Exception as e:
-        st.session_state.ser = None
         st.error(f"⚠️ Could not open COM5: {e}")
+        return None
 
-ser = st.session_state.ser
-if ser is None:
-    st.stop()
+if 'ser' not in st.session_state:
+    st.session_state.ser = try_connect_serial()
 
-# ---------------- STORAGE ----------------
-if 'timestamps' not in st.session_state:
+# ---------------- SESSION INITIALIZATION ----------------
+if "view" not in st.session_state:
+    st.session_state.view = "dashboard"
+if "timestamps" not in st.session_state:
     st.session_state.timestamps = []
     st.session_state.upstream_data = []
     st.session_state.downstream_data = []
     st.session_state.difference_data = []
     st.session_state.status_data = []
-    st.session_state.last_status_sent = None
 
-placeholder = st.empty()
-remark_placeholder = st.empty()
-chart_placeholder = st.empty()
-
-# ---------------- STATUS THRESHOLDS ----------------
-FLOOD_THRESHOLD = 7.0
-MODERATE_THRESHOLD = 4.0
-
-def get_status(upstream):
-    if upstream >= FLOOD_THRESHOLD:
-        return "🚨 FLOODED", "#ff4d4d"
-    elif upstream >= MODERATE_THRESHOLD:
-        return "⚠️ MODERATE", "#fff176"
+# ---------------- HELPER FUNCTIONS ----------------
+def get_status(difference):
+    if difference >= 2.5:
+        return "🚨 FULL BLOCKAGE", "#ff4d4d"
+    elif difference >= 1.0:
+        return "⚠️ PARTIAL BLOCKAGE", "#fff176"
     else:
-        return "✅ NORMAL", "#81c784"
+        return "✅ NORMAL FLOW", "#81c784"
 
 def get_remark(status):
-    if status == "✅ NORMAL":
-        return "💧 Water levels are within safe limits."
-    elif status == "⚠️ MODERATE":
-        return "⚠️ Water level approaching standard."
-    elif status == "🚨 FLOODED":
-        return "🌊 Overflow observed. Maintenance needed."
+    if status == "✅ NORMAL FLOW":
+        return "💧 Flow is stable — no obstruction detected."
+    elif status == "⚠️ PARTIAL BLOCKAGE":
+        return "⚠️ Partial blockage detected. Monitor canal condition."
+    elif status == "🚨 FULL BLOCKAGE":
+        return "🌊 Full blockage detected! Immediate maintenance required."
     else:
         return ""
 
-def read_serial():
+def read_serial_line():
     try:
-        if ser.in_waiting:
-            line = ser.readline().decode(errors='ignore').strip()
-            parts = line.split(",")
-            if len(parts) == 2:
-                upstream = float(parts[0])
-                downstream = float(parts[1])
-                return upstream, downstream
+        if st.session_state.ser and st.session_state.ser.in_waiting:
+            line = st.session_state.ser.readline().decode('utf-8', errors='ignore').strip()
+            if ',' in line:
+                parts = line.split(',')
+                if len(parts) == 3:  # Downstream, Upstream, Difference
+                    try:
+                        downstream = float(parts[0])
+                        upstream = float(parts[1])
+                        difference = float(parts[2])
+                        return upstream, downstream, difference
+                    except ValueError:
+                        return None, None, None
+        return None, None, None
+    except Exception as e:
+        st.error(f"Serial read error: {e}")
+        return None, None, None
+
+    try:
+        if st.session_state.ser and st.session_state.ser.in_waiting:
+            line = st.session_state.ser.readline().decode('utf-8', errors='ignore').strip()
+            if ',' in line:
+                parts = line.split(',')
+                if len(parts) == 2:
+                    try:
+                        downstream = float(parts[0])
+                        upstream = float(parts[1])
+                        return upstream, downstream
+                    except ValueError:
+                        return None, None
         return None, None
-    except:
+    except Exception as e:
+        st.error(f"Serial read error: {e}")
         return None, None
 
 
 def log_to_csv(timestamp, upstream, downstream, difference, status):
     filename = f"logs/daloy_log_{datetime.now().strftime('%Y-%m-%d')}.csv"
-    with open(filename, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow([timestamp, upstream, downstream, difference, status])
+    try:
+        with open(filename, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow([timestamp, upstream, downstream, difference, status])
+    except PermissionError:
+        st.warning(f"⚠️ Log file {filename} is in use — skipping this entry.")
 
+# ---------------- DASHBOARD VIEW ----------------
+def show_dashboard():
+    st.title("💧 DALOY Monitoring App")
+    st.subheader("Real-Time Kanal Flood Monitoring Dashboard")
 
+    upstream, downstream, difference = read_serial_line()
+    timestamp = datetime.now()
+    if upstream is not None and downstream is not None and difference is not None:
 
-# ---------------- DEFAULT ----------------
-with placeholder.container():
-    st.markdown(f"""
-    <div class="reading-box">
-        <h2>⚠️ Waiting for ESP32 readings...</h2>
-        <div class="reading-grid">
-            <div class="reading-item">🌊 Upstream<br>-- cm</div>
-            <div class="reading-item">💧 Downstream<br>-- cm</div>
-            <div class="reading-item">🔁 Difference<br>-- cm</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+        status_display, color = get_status(difference)
+        remark = get_remark(status_display)
 
-with remark_placeholder.container():
-    st.markdown(f"<div class='remark-box'>Waiting for ESP32 readings...</div>", unsafe_allow_html=True)
-
-chart_placeholder.empty()
-
-# ---------------- UPDATE LOOP ----------------
-while True:
-    upstream, downstream = read_serial()
-    if upstream is not None and downstream is not None:
-        timestamp = time.strftime("%H:%M:%S")
-        difference = upstream - downstream
-
-        status_display, color = get_status(upstream)
         st.session_state.timestamps.append(timestamp)
         st.session_state.upstream_data.append(upstream)
         st.session_state.downstream_data.append(downstream)
         st.session_state.difference_data.append(difference)
         st.session_state.status_data.append(status_display)
 
-        remark = get_remark(status_display)
-
-        # Email alerts
-        if recipient_email and status_display in ["⚠️ MODERATE", "🚨 FLOODED"]:
-            if st.session_state.last_status_sent != status_display:
-                email_queue.put((recipient_email, f"{status_display} - Kanal Alert", remark))
-                st.session_state.last_status_sent = status_display
-        elif status_display == "✅ NORMAL":
-            st.session_state.last_status_sent = None
-
         log_to_csv(timestamp, upstream, downstream, difference, status_display)
 
-        # Update placeholders
-        with placeholder.container():
-            st.markdown(f"""
-            <div class="reading-box" style="background-color:{color};">
-                <h2>{status_display}</h2>
-                <div class="reading-grid">
-                    <div class="reading-item">🌊 Upstream<br>{upstream:.2f} cm</div>
-                    <div class="reading-item">💧 Downstream<br>{downstream:.2f} cm</div>
-                    <div class="reading-item">🔁 Difference<br>{difference:.2f} cm</div>
-                </div>
+        st.markdown(f"""
+        <div class="reading-box" style="background-color:{color};">
+            <h2>{status_display}</h2>
+            <div class="reading-grid">
+                <div class="reading-item">🌊 Upstream<br>{upstream:.2f} cm</div>
+                <div class="reading-item">💧 Downstream<br>{downstream:.2f} cm</div>
+                <div class="reading-item">🔁 Difference<br>{difference:.2f} cm</div>
             </div>
-            """, unsafe_allow_html=True)
+        </div>
+        """, unsafe_allow_html=True)
 
-        with remark_placeholder.container():
-            st.markdown(f"<div class='remark-box'>{remark}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='remark-box'>{remark}</div>", unsafe_allow_html=True)
 
-        # Update chart
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=st.session_state.timestamps, y=st.session_state.upstream_data,
                                  mode="lines+markers", name="🌊 Upstream", line=dict(color="blue", width=3)))
@@ -201,8 +157,43 @@ while True:
             paper_bgcolor="#a7d8f0",
             plot_bgcolor="#ffffff",
             font=dict(color="black"),
-            height=400
+            height=450
         )
-        chart_placeholder.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
 
-    time.sleep(1)
+    else:
+        st.info("Waiting for data... Make sure the Arduino is connected and sending serial readings.")
+
+    # auto-refresh every 2 seconds
+    time.sleep(2)
+    st.rerun()
+
+    if st.button("📊 Show Log CSV with Spikes", key="log_view_button"):
+        st.session_state["view"] = "log"
+        st.rerun()
+
+# ---------------- LOG VIEW ----------------
+def show_log_view():
+    st.title("📄 Log Viewer - DALOY Readings")
+    csv_file = f"logs/daloy_log_{datetime.now().strftime('%Y-%m-%d')}.csv"
+    if os.path.exists(csv_file):
+        df = pd.read_csv(csv_file, names=["Timestamp","Upstream","Downstream","Difference","Status"])
+        df["Spike"] = df["Difference"] >= 1.0
+
+        def highlight_spikes(row):
+            color = "#ffcccc" if row["Spike"] else ""
+            return ["background-color: " + color] * len(row)
+
+        st.dataframe(df.style.apply(highlight_spikes, axis=1), use_container_width=True)
+    else:
+        st.info("No log data found yet.")
+
+    if st.button("⬅️ Back to Dashboard", key="back_to_dashboard"):
+        st.session_state["view"] = "dashboard"
+        st.rerun()
+
+# ---------------- PAGE CONTROL ----------------
+if st.session_state.view == "dashboard":
+    show_dashboard()
+else:
+    show_log_view()
