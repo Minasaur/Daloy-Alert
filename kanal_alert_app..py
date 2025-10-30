@@ -3,6 +3,8 @@ import plotly.graph_objects as go
 import time, csv, os, pandas as pd
 from datetime import datetime
 import requests
+from streamlit_autorefresh import st_autorefresh
+
 
 # ---------------- CONFIG ----------------
 os.makedirs("logs", exist_ok=True)
@@ -98,11 +100,15 @@ def log_to_csv(timestamp, upstream, downstream, difference, status):
 
 # ---------------- DASHBOARD VIEW ----------------
 def show_dashboard():
+    # Auto-refresh every 2 seconds
+    st_autorefresh(interval=2000, key="datarefresh")  # 👈 add this here
+
     st.title("💧 DALOY Monitoring App")
     st.subheader("Real-Time Kanal Flood Monitoring Dashboard")
 
     upstream, downstream, difference = fetch_data()
     timestamp = datetime.now()
+
 
     if upstream is not None and downstream is not None and difference is not None:
 
