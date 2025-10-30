@@ -4,7 +4,7 @@ from datetime import datetime
 
 import requests
 
-BACKEND_URL = "https://daloy-alert.onrender.com"  # replace with your URL
+BACKEND_URL = "https://daloy-alert.onrender.com/data"  # replace with your URL
 
 def fetch_data():
     try:
