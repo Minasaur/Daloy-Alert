@@ -22,11 +22,10 @@ button[kind="primary"] { background-color: #0d47a1 !important; color: white !imp
 """, unsafe_allow_html=True)
 
 # ---------------- BACKEND CONFIG ----------------
-BACKEND_URL = "https://daloy-alert.onrender.com/data"  # replace with your Render backend URL
-
 def fetch_data():
     try:
-        response = requests.get(BACKEND_URL, timeout=5)
+        FIREBASE_URL = "https://daloy-alert-default-rtdb.asia-southeast1.firebasedatabase.app/latest_reading.json"
+        response = requests.get(FIREBASE_URL, timeout=5)
         if response.status_code == 200:
             data = response.json()
             downstream = data.get("downstream")
@@ -36,8 +35,9 @@ def fetch_data():
                 return upstream, downstream, difference
         return None, None, None
     except Exception as e:
-        st.error(f"Error fetching data: {e}")
+        st.error(f"Error fetching data from Firebase: {e}")
         return None, None, None
+
 
 # ---------------- SESSION INITIALIZATION ----------------
 if "view" not in st.session_state:
