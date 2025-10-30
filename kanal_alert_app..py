@@ -1,30 +1,12 @@
-import serial, streamlit as st, plotly.graph_objects as go
+import streamlit as st
+import plotly.graph_objects as go
 import time, csv, os, pandas as pd
 from datetime import datetime
-
 import requests
-
-BACKEND_URL = "https://daloy-alert.onrender.com/data"  # replace with your URL
-
-def fetch_data():
-    try:
-        response = requests.get(BACKEND_URL)
-        if response.status_code == 200:
-            data = response.json()
-            downstream = data.get("downstream")
-            upstream = data.get("upstream")
-            difference = data.get("difference")
-            if downstream is not None and upstream is not None and difference is not None:
-                return upstream, downstream, difference
-        return None, None, None
-    except Exception as e:
-        st.error(f"Error fetching data: {e}")
-        return None, None, None
-
 
 # ---------------- CONFIG ----------------
 os.makedirs("logs", exist_ok=True)
-st.set_page_config(page_title="💧 DALOY Monitoring App", layout="wide")  # 👈 full screen layout
+st.set_page_config(page_title="💧 DALOY Monitoring App", layout="wide")  # full screen
 
 # ---------------- STYLE ----------------
 st.markdown("""
@@ -39,21 +21,23 @@ button[kind="primary"] { background-color: #0d47a1 !important; color: white !imp
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- SERIAL SETUP ----------------
-def try_connect_serial():
-    try:
-        if 'ser' in st.session_state and st.session_state.ser and st.session_state.ser.is_open:
-            return st.session_state.ser
-        ser = serial.Serial("COM5", 115200, timeout=2)
-        time.sleep(2)
-        ser.reset_input_buffer()
-        return ser
-    except Exception as e:
-        st.error(f"⚠️ Could not open COM5: {e}")
-        return None
+# ---------------- BACKEND CONFIG ----------------
+BACKEND_URL = "https://daloy-alert.onrender.com/data"  # replace with your Render backend URL
 
-if 'ser' not in st.session_state:
-    st.session_state.ser = try_connect_serial()
+def fetch_data():
+    try:
+        response = requests.get(BACKEND_URL, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            downstream = data.get("downstream")
+            upstream = data.get("upstream")
+            difference = data.get("difference")
+            if downstream is not None and upstream is not None and difference is not None:
+                return upstream, downstream, difference
+        return None, None, None
+    except Exception as e:
+        st.error(f"Error fetching data: {e}")
+        return None, None, None
 
 # ---------------- SESSION INITIALIZATION ----------------
 if "view" not in st.session_state:
@@ -84,43 +68,6 @@ def get_remark(status):
     else:
         return ""
 
-def read_serial_line():
-    try:
-        if st.session_state.ser and st.session_state.ser.in_waiting:
-            line = st.session_state.ser.readline().decode('utf-8', errors='ignore').strip()
-            if ',' in line:
-                parts = line.split(',')
-                if len(parts) == 3:  # Downstream, Upstream, Difference
-                    try:
-                        downstream = float(parts[0])
-                        upstream = float(parts[1])
-                        difference = float(parts[2])
-                        return upstream, downstream, difference
-                    except ValueError:
-                        return None, None, None
-        return None, None, None
-    except Exception as e:
-        st.error(f"Serial read error: {e}")
-        return None, None, None
-
-    try:
-        if st.session_state.ser and st.session_state.ser.in_waiting:
-            line = st.session_state.ser.readline().decode('utf-8', errors='ignore').strip()
-            if ',' in line:
-                parts = line.split(',')
-                if len(parts) == 2:
-                    try:
-                        downstream = float(parts[0])
-                        upstream = float(parts[1])
-                        return upstream, downstream
-                    except ValueError:
-                        return None, None
-        return None, None
-    except Exception as e:
-        st.error(f"Serial read error: {e}")
-        return None, None
-
-
 def log_to_csv(timestamp, upstream, downstream, difference, status):
     filename = f"logs/daloy_log_{datetime.now().strftime('%Y-%m-%d')}.csv"
     try:
@@ -135,8 +82,9 @@ def show_dashboard():
     st.title("💧 DALOY Monitoring App")
     st.subheader("Real-Time Kanal Flood Monitoring Dashboard")
 
-    upstream, downstream, difference = read_serial_line()
+    upstream, downstream, difference = fetch_data()
     timestamp = datetime.now()
+
     if upstream is not None and downstream is not None and difference is not None:
 
         status_display, color = get_status(difference)
@@ -182,7 +130,7 @@ def show_dashboard():
         st.plotly_chart(fig, use_container_width=True)
 
     else:
-        st.info("Waiting for data... Make sure the Arduino is connected and sending serial readings.")
+        st.info("Waiting for data... Make sure the ESP32 is connected and sending readings.")
 
     # auto-refresh every 2 seconds
     time.sleep(2)
