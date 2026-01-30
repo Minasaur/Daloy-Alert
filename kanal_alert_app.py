@@ -26,33 +26,25 @@ button[kind="primary"] { background-color: #0d47a1 !important; color: white !imp
 # ---------------- BACKEND CONFIG ----------------
 def fetch_data():
     try:
-        FIREBASE_URL = "https://daloy-alert-default-rtdb.asia-southeast1.firebasedatabase.app/canal_readings.json"
-        response = requests.get(FIREBASE_URL, timeout=5)
+        BASE_URL = "https://daloy-alert-default-rtdb.asia-southeast1.firebasedatabase.app/canal_readings"
 
-        if response.status_code == 200:
-            data = response.json()
+        esp1 = requests.get(f"{BASE_URL}/ESP1.json", timeout=5).json()
+        esp2 = requests.get(f"{BASE_URL}/ESP2.json", timeout=5).json()
 
-            if not data:
-                st.info("No data found in Firebase yet. Waiting for ESP32 to send readings...")
-                return None, None, None
-
-            # Get the most recent record
-            last_key = list(data.keys())[-1]
-            latest = data[last_key]
-
-            downstream = latest.get("downstream")
-            upstream = latest.get("upstream")
-            difference = latest.get("difference")
-
-            if downstream is not None and upstream is not None and difference is not None:
-                return upstream, downstream, difference
-
-            st.warning("Incomplete data in latest Firebase record.")
+        if not esp1 or not esp2:
+            st.info("Waiting for both ESP32 devices to send data...")
             return None, None, None
 
-        else:
-            st.error(f"Firebase responded with status: {response.status_code}")
+        upstream = esp1.get("upstream")
+        downstream = esp2.get("downstream")
+
+        if upstream is None or downstream is None:
+            st.warning("Incomplete ESP data detected.")
             return None, None, None
+
+        difference = abs(upstream - downstream)
+
+        return upstream, downstream, difference
 
     except Exception as e:
         st.error(f"Error fetching data from Firebase: {e}")
