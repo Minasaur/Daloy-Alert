@@ -39,18 +39,35 @@ h1, h2, h3, h4, h5, h6, p, span, label, div { color: black !important; }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- FIREBASE FETCH ----------------
+# ---------------- SUPABASE CONFIG ----------------
+SUPABASE_URL = "https://mdruypdfmluyoadyafml.supabase.co/rest/v1/daloy_data"
+SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1kcnV5cGRmbWx1eW9hZHlhZm1sIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2MzMwNDksImV4cCI6MjA4OTIwOTA0OX0.ulpt0h_O2cazEfpVoESOzIzn9wLu5ADb9TBqofD6INw"  # Replace with your anon key
+
+HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+}
+
+# ---------------- FETCH DATA ----------------
 def fetch_data():
     try:
-        url = "https://daloy-alert-default-rtdb.asia-southeast1.firebasedatabase.app/canal_readings.json"
-        data = requests.get(url, timeout=5).json()
-        if not data: return None, None, None
-        upstream = float(data["ESP1"]["upstream"])
-        downstream = float(data["ESP2"]["downstream"])
+        response = requests.get(SUPABASE_URL, headers=HEADERS, timeout=5)
+        response.raise_for_status()
+        data_list = response.json()
+        if not data_list:
+            return None, None, None
+        row = data_list[0]  # first row
+        upstream = float(row.get("upstream_distance", 0))
+        downstream = float(row.get("downstream_distance", 0))
         difference = abs(upstream - downstream)
         return upstream, downstream, difference
+    except requests.exceptions.HTTPError as err:
+        st.warning(f"Supabase HTTP error: {err}")
+        return None, None, None
     except Exception as e:
-        st.warning(f"Firebase error: {e}")
+        st.warning(f"Supabase error: {e}")
         return None, None, None
 
 # ---------------- SESSION STATE ----------------
@@ -106,7 +123,7 @@ def show_dashboard():
     st.session_state.last_values = current
     timestamp = datetime.now()
 
-    # store values and limit to 25 points for smooth graph
+    # store values and limit to 25 points
     MAX_POINTS = 25
     st.session_state.timestamps.append(timestamp)
     st.session_state.upstream.append(upstream)
