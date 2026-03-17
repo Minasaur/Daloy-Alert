@@ -52,23 +52,33 @@ HEADERS = {
 
 # ---------------- FETCH DATA ----------------
 def fetch_data():
+    """
+    Fetches upstream and downstream distances from Supabase
+    Computes difference = upstream - downstream
+    """
     try:
         response = requests.get(SUPABASE_URL, headers=HEADERS, timeout=5)
         response.raise_for_status()
         data_list = response.json()
         if not data_list:
             return None, None, None
+
         row = data_list[0]  # first row
         upstream = float(row.get("upstream_distance", 0))
         downstream = float(row.get("downstream_distance", 0))
-        difference = abs(upstream - downstream)
+
+        # ---------------- BLOCKAGE METRIC ----------------
+        difference = upstream - downstream  # upstream must be higher to indicate blockage
+
         return upstream, downstream, difference
+
     except requests.exceptions.HTTPError as err:
         st.warning(f"Supabase HTTP error: {err}")
         return None, None, None
     except Exception as e:
         st.warning(f"Supabase error: {e}")
         return None, None, None
+
 
 # ---------------- SESSION STATE ----------------
 if "timestamps" not in st.session_state:
@@ -80,8 +90,13 @@ if "timestamps" not in st.session_state:
 
 # ---------------- STATUS ----------------
 def get_status(diff):
-    if diff >= 2.5: return "🚨 FULL BLOCKAGE", "#ff4d4d"
-    elif diff >= 1.0: return "⚠️ PARTIAL BLOCKAGE", "#fff176"
+    """
+    Returns status string and color based on difference metric
+    """
+    if diff >= 4.0:
+        return "🚨 FULL BLOCKAGE", "#ff4d4d"
+    elif diff >= 1.0:
+        return "⚠️ PARTIAL BLOCKAGE", "#fff176"
     return "✅ NORMAL FLOW", "#81c784"
 
 def get_remark(status):
